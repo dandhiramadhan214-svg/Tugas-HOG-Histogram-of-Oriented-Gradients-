@@ -1,0 +1,1 @@
+# Tugas-HOG-Histogram-of-Oriented-Gradients-
