@@ -1,0 +1,20 @@
+[
+    {
+        "file": "hog_1764311113385.jpg",
+        "label": "hog",
+        "original_name": "hogtest.jpg",
+        "timestamp": 1764311113385,
+        "person_detected": 0,
+        "hog_visualization": "hog_1764311113385_hog.png",
+        "detection_result": "hog_1764311113385_detection.png"
+    },
+    {
+        "file": "hog_1764311271879.jpg",
+        "label": "hog",
+        "original_name": "hogtest.jpg",
+        "timestamp": 1764311271879,
+        "person_detected": 0,
+        "hog_visualization": "hog_1764311271879_hog.png",
+        "detection_result": "hog_1764311271879_detection.png"
+    }
+]

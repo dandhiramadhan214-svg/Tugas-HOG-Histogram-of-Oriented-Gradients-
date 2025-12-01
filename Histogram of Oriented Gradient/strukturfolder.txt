@@ -1,0 +1,387 @@
+    Document/
+    └── Histogram of Oriented Gradient/
+        ├── image/
+        │   └── hogtest.png
+        ├── label/
+        │   └── label.json
+        └── hog.ipynb
+
+# =============================
+#        IMPORT & SETUP
+# =============================
+
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import json
+import time
+from skimage.feature import hog
+from skimage import exposure
+from ipywidgets import Button, Text, VBox, Output, FileUpload
+from IPython.display import clear_output, display
+import shutil
+import io
+
+print("Library siap!")
+
+# =============================
+#        CONFIG
+# =============================
+OUTPUT_IMAGE_FOLDER = "image"
+OUTPUT_LABEL_FOLDER = "label"
+OUTPUT_RESULT_FOLDER = "result"
+JSON_FILE = os.path.join(OUTPUT_LABEL_FOLDER, "label.json")
+
+# ============================================================
+# HOG DETECTOR (People Detector bawaan OpenCV)
+# ============================================================
+hog_people = cv2.HOGDescriptor()
+hog_people.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
+FULL_BODY_MIN_HEIGHT_RATIO = 0.8
+
+# Create output folders
+os.makedirs(OUTPUT_IMAGE_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_LABEL_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_RESULT_FOLDER, exist_ok=True)
+
+# Load labels
+if os.path.exists(JSON_FILE):
+    with open(JSON_FILE, "r") as jf:
+        try:
+            labels = json.load(jf)
+            if isinstance(labels, dict):
+                labels = [{"file": k, "label": v} for k, v in labels.items()]
+            elif not isinstance(labels, list):
+                labels = []
+        except:
+            labels = []
+else:
+    labels = []
+
+# ============================================================
+# VISUALISASI HOG (skimage) - SAVE VERSION
+# ============================================================
+def visualize_hog(image, save_path=None):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    resized = cv2.resize(gray, (128, 128))
+
+    fd, hog_img = hog(
+        resized,
+        orientations=9,
+        pixels_per_cell=(8, 8),
+        cells_per_block=(2, 2),
+        visualize=True
+    )
+
+    hog_img = exposure.rescale_intensity(hog_img, in_range=(0, 10))
+
+    # Create and save plot
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    
+    axes[0].imshow(resized, cmap='gray')
+    axes[0].set_title("Grayscale 128x128")
+    axes[0].axis('off')
+
+    axes[1].imshow(hog_img, cmap='gray')
+    axes[1].set_title("HOG Features")
+    axes[1].axis('off')
+
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        print(f"HOG visualization saved: {save_path}")
+    
+    plt.show()
+    
+    return resized, hog_img
+
+
+# ============================================================
+# DETEKSI ORANG FULL BODY (OpenCV HOG + SVM) - SAVE VERSION
+# ============================================================
+def detect_people_opencv(image, save_path=None, min_height_ratio=FULL_BODY_MIN_HEIGHT_RATIO):
+    img_h, img_w = image.shape[:2]
+
+    # Resize untuk performa
+    scale_factor = 400.0 / img_w if img_w > 400 else 1.0
+    resized = cv2.resize(image, (int(img_w * scale_factor), int(img_h * scale_factor)))
+
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+
+    rects, weights = hog_people.detectMultiScale(
+        gray,
+        winStride=(4, 4),
+        padding=(8, 8),
+        scale=1.05
+    )
+
+    mapped_rects = []
+    for (x, y, w, h) in rects:
+        mapped_rects.append((
+            int(x / scale_factor),
+            int(y / scale_factor),
+            int(w / scale_factor),
+            int(h / scale_factor)
+        ))
+
+    rgb_original = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    result = rgb_original.copy()
+
+    fullbody_count = 0
+
+    for (x, y, w, h) in mapped_rects:
+        if (h / img_h) < min_height_ratio:
+            continue
+
+        fullbody_count += 1
+
+        cv2.rectangle(result, (x, y), (x + w, y + h), (255, 0, 0), 3)
+        cv2.putText(
+            result, "person", (x, y - 5),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2
+        )
+
+    # Create and save plot
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    
+    axes[0].imshow(rgb_original)
+    axes[0].set_title("Original")
+    axes[0].axis('off')
+
+    axes[1].imshow(result)
+    axes[1].set_title(f"HOG People Detection ({fullbody_count} person(s))")
+    axes[1].axis('off')
+
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        print(f"Detection result saved: {save_path}")
+    
+    plt.show()
+
+    print(f"👤 Jumlah orang terdeteksi (full body): {fullbody_count}")
+    return fullbody_count
+
+
+# =====================================================
+#     PROCESS IMAGE WITH HOG AND SAVE
+# =====================================================
+def process_image_with_hog(img, label, original_filename):
+    """
+    Process image with HOG visualization and detection,
+    save everything including visualization results
+    """
+    
+    timestamp = int(time.time() * 1000)
+    base_name = f"{label}_{timestamp}"
+    
+    # 1. Save original image
+    img_filename = f"{base_name}.jpg"
+    img_filepath = os.path.join(OUTPUT_IMAGE_FOLDER, img_filename)
+    cv2.imwrite(img_filepath, img)
+    print(f"\nOriginal image saved: {img_filename}")
+    
+    # 2. Save HOG visualization
+    print("\n--- VISUALISASI HOG ---")
+    hog_save_path = os.path.join(OUTPUT_RESULT_FOLDER, f"{base_name}_hog.png")
+    visualize_hog(img, save_path=hog_save_path)
+    
+    # 3. Save detection result
+    print("\n--- DETEKSI ORANG FULL BODY (HOG + SVM) ---")
+    detect_save_path = os.path.join(OUTPUT_RESULT_FOLDER, f"{base_name}_detection.png")
+    person_count = detect_people_opencv(img, save_path=detect_save_path)
+    
+    # 4. Update labels.json
+    label_entry = {
+        "file": img_filename,
+        "label": label,
+        "original_name": original_filename,
+        "timestamp": timestamp,
+        "person_detected": person_count,
+        "hog_visualization": f"{base_name}_hog.png",
+        "detection_result": f"{base_name}_detection.png"
+    }
+    
+    labels.append(label_entry)
+    
+    with open(JSON_FILE, "w") as jf:
+        json.dump(labels, jf, indent=4)
+    
+    print(f"\nLabel saved to: {JSON_FILE}")
+    
+    # Show latest entry
+    print("\nLatest label entry:")
+    print(json.dumps(label_entry, indent=4))
+    
+    print("\nProcessing complete!")
+    print(f"Check folders:")
+    print(f"   - image/ : original images")
+    print(f"   - result/ : HOG visualizations & detection results")
+    print(f"   - label/ : label.json")
+
+
+# =====================================================
+#     ZIP DOWNLOAD
+# =====================================================
+def make_zip(_):
+    with output_area:
+        clear_output()
+        
+        print("\n" + "=" * 60)
+        print("CREATING DATASET ZIP")
+        print("=" * 60)
+        
+        temp = "dataset_temp"
+        
+        # Clean temp
+        if os.path.exists(temp):
+            shutil.rmtree(temp)
+        os.makedirs(temp)
+        
+        # Copy folders
+        folders_to_zip = [OUTPUT_IMAGE_FOLDER, OUTPUT_LABEL_FOLDER, OUTPUT_RESULT_FOLDER]
+        
+        for folder in folders_to_zip:
+            if os.path.exists(folder):
+                shutil.copytree(folder, os.path.join(temp, folder))
+                print(f"Copied: {folder}/")
+        
+        # Create zip
+        zip_name = "hog_dataset"
+        shutil.make_archive(zip_name, "zip", temp)
+        
+        print(f"\n{zip_name}.zip created successfully!")
+        print(f"Location: {os.path.abspath(zip_name + '.zip')}")
+        print("\nContents:")
+        print(f"   - image/        : {len(os.listdir(OUTPUT_IMAGE_FOLDER)) if os.path.exists(OUTPUT_IMAGE_FOLDER) else 0} files")
+        print(f"   - result/       : {len(os.listdir(OUTPUT_RESULT_FOLDER)) if os.path.exists(OUTPUT_RESULT_FOLDER) else 0} files")
+        print(f"   - label/        : label.json ({len(labels)} entries)")
+        
+        # Clean up temp
+        shutil.rmtree(temp)
+
+
+# =====================================================
+#     HANDLE FILE UPLOAD
+# =====================================================
+def handle_upload(change):
+    """Handler ketika file di-upload"""
+    
+    # Get uploaded file first
+    uploaded_files = change['new']
+    
+    if not uploaded_files or len(uploaded_files) == 0:
+        return
+    
+    # Now check label
+    label_text = label_box.value.strip()
+    
+    if not label_text:
+        with output_area:
+            clear_output()
+            print("Label tidak boleh kosong! Silakan isi label terlebih dahulu.")
+        # Reset upload widget
+        upload_widget.value = ()
+        return
+    
+    with output_area:
+        clear_output()
+        print("=" * 60)
+        print("PROCESSING IMAGE")
+        print("=" * 60)
+        print(f"\nLabel: {label_text}")
+        
+        # FileUpload returns tuple of FileInfo objects
+        # Get first uploaded file
+        file_info = uploaded_files[0]
+        filename = file_info['name']
+        file_bytes = file_info['content']
+        
+        print(f"File: {filename}")
+        
+        # Convert bytes to numpy array
+        nparr = np.frombuffer(file_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            print("Tidak bisa membaca gambar. Pastikan formatnya benar (jpg, png, etc)")
+            # Reset upload widget
+            upload_widget.value = ()
+            return
+        
+        print(f"Gambar berhasil dibaca!")
+        print(f"Ukuran: {img.shape[1]}x{img.shape[0]} pixels")
+        
+        # Process with HOG and save
+        try:
+            process_image_with_hog(img, label_text, filename)
+        except Exception as e:
+            print(f"Error during processing: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Clear label and upload widget for next run
+    label_box.value = ""
+    upload_widget.value = ()
+
+
+# =====================================================
+#     UI ELEMENTS
+# =====================================================
+label_box = Text(
+    value="",
+    placeholder="e.g., person, car, bicycle",
+    description="Label:",
+    style={'description_width': 'initial'}
+)
+
+upload_widget = FileUpload(
+    accept='image/*',
+    multiple=False,
+    description="Upload Image:",
+    button_style='success',
+    icon='upload'
+)
+
+upload_widget.observe(handle_upload, names='value')
+
+zip_button = Button(
+    description="DOWNLOAD ZIP",
+    button_style="warning",
+    icon='download'
+)
+
+output_area = Output()
+
+zip_button.on_click(make_zip)
+
+ui = VBox([
+    label_box,
+    upload_widget,
+    zip_button,
+    output_area
+])
+
+# =====================================================
+#     DISPLAY UI
+# =====================================================
+print("\n" + "=" * 60)
+print("   HOG IMPLEMENTATION - FILE UPLOAD MODE")
+print("=" * 60)
+print("\nINSTRUKSI:")
+print("1. Masukkan label untuk gambar (contoh: person, car, bicycle)")
+print("2. Klik tombol 'Upload' dan pilih file gambar")
+print("3. Tunggu hasil visualisasi HOG dan deteksi muncul")
+print("4. Hasil otomatis tersimpan di:")
+print("   image/  : gambar original")
+print("   result/ : visualisasi HOG & deteksi")
+print("   label/  : label.json")
+print("5. Klik ' DOWNLOAD ZIP' untuk download semua")
+print("\n" + "=" * 60)
+print()
+
+display(ui)
