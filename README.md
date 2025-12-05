@@ -59,7 +59,6 @@ Gabungkan semua histogram menjadi feature vector
 Hasil
 
 Contoh visualisasi HOG:
-(jika punya gambar hasil, sertakan di sini)
 
 Referensi
 
